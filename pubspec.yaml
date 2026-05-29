@@ -1,0 +1,68 @@
+name: novaml_app
+description: NOVAML — No-Code Visual Astronomical Machine Learning Desktop App
+version: 1.0.0+1
+publish_to: none
+
+environment:
+  sdk: ">=3.3.0 <4.0.0"
+  flutter: ">=3.22.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # Navigation
+  go_router: ^13.2.0
+
+  # HTTP
+  dio: ^5.4.3+1
+
+  # Local storage (preferences only)
+  shared_preferences: ^2.2.3
+
+  # UI
+  google_fonts: ^6.2.1
+  lucide_icons: ^0.257.0
+
+  # Drag and drop
+  desktop_drop: ^0.4.4
+
+  # File picker
+  file_picker: ^8.0.3
+
+  # Charts
+  fl_chart: ^0.68.0
+
+  # Data table
+  data_table_2: ^2.5.12
+
+  # Window management
+  window_manager: ^0.3.9
+
+  # Utils
+  intl: ^0.19.0
+  equatable: ^2.0.5
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.9.0
+  path: ^1.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  build_runner: ^2.4.9
+  freezed: ^2.5.2
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.4.0
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # assets:
+    # - assets/images/
+    # - assets/icons/

@@ -59,13 +59,34 @@ try {
   $disk = Get-WmiObject Win32_LogicalDisk -Filter "DeviceID='C:'"
   $gpu  = 0
   $gpuOk = $false
+
+  # 1. Tenta nvidia-smi (GPUs NVIDIA)
   try {
     $raw = & nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>$null
-    if ($LASTEXITCODE -eq 0) {
-      $gpu = [int]($raw -replace '\s','')
+    if ($LASTEXITCODE -eq 0 -and $raw) {
+      $gpu   = [int]($raw -replace '\s','')
       $gpuOk = $true
     }
   } catch {}
+
+  # 2. Tenta Get-Counter com GPU Engine (Windows 10/11 — NVIDIA, AMD, Intel)
+  if (-not $gpuOk) {
+    try {
+      $samples = (Get-Counter '\GPU Engine(*engtype_3D*)\Utilization Percentage' -ErrorAction Stop).CounterSamples
+      $sum = ($samples | Measure-Object CookedValue -Sum).Sum
+      $gpu   = [int][Math]::Round($sum)
+      $gpuOk = $true
+    } catch {}
+  }
+
+  # 3. Tenta Get-Counter via GPU Adapter (fallback mais amplo)
+  if (-not $gpuOk) {
+    try {
+      $samples = (Get-Counter '\GPU Adapter Memory(*)\Dedicated Usage' -ErrorAction Stop).CounterSamples
+      if ($samples.Count -gt 0) { $gpuOk = $true }
+    } catch {}
+  }
+
   [PSCustomObject]@{
     RamTotalKb = [long]$os.TotalVisibleMemorySize
     RamFreeKb  = [long]$os.FreePhysicalMemory

@@ -1,13 +1,60 @@
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:novaml_app/core/models/api_models.dart';
 import 'package:novaml_app/core/theme/app_colors.dart';
 import 'package:novaml_app/core/theme/app_spacing.dart';
 import 'package:novaml_app/core/theme/app_text_styles.dart';
+import 'package:novaml_app/shared/providers/models_provider.dart';
+import 'package:novaml_app/shared/providers/navigation_provider.dart';
+import 'package:novaml_app/shared/widgets/components/nova_button.dart';
 
-/// Dashboard de resultados — Classification Analysis.
-/// Fiel ao protótipo Stitch: métricas, confusion matrix, scatter plot PCA.
-class DashboardResultsPage extends StatelessWidget {
+/// Dashboard de resultados — exibe dados reais do último modelo treinado.
+class DashboardResultsPage extends ConsumerWidget {
   const DashboardResultsPage({super.key});
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final model = ref.watch(lastTrainedModelProvider);
+
+    if (model == null) {
+      return Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.analytics_outlined,
+                size: 48, color: AppColors.textDisabled),
+            const SizedBox(height: 16),
+            Text('Nenhum modelo treinado', style: AppTextStyles.h2),
+            const SizedBox(height: 8),
+            Text(
+              'Treine um modelo no workspace para ver os resultados aqui.',
+              style: AppTextStyles.bodySm,
+            ),
+            const SizedBox(height: 24),
+            NovaButton(
+              label: 'Ir para Workspace',
+              onPressed: () => ref.read(appFlowProvider.notifier).state =
+                  AppFlowState.workspace,
+              leading: const Icon(Icons.science_outlined, size: 16),
+            ),
+          ],
+        ),
+      );
+    }
+
+    return _ResultsDashboard(model: model);
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dashboard com dados reais
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ResultsDashboard extends StatelessWidget {
+  const _ResultsDashboard({required this.model});
+
+  final StoredModel model;
 
   @override
   Widget build(BuildContext context) {
@@ -16,65 +63,68 @@ class DashboardResultsPage extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Hero ───────────────────────────────────────────────────────────
-          const _HeroSection(),
+          _HeroSection(model: model),
           const SizedBox(height: 28),
 
-          // ── Metric cards ───────────────────────────────────────────────────
-          const Row(
+          // ── Metric cards ─────────────────────────────────────────────────────
+          Row(
             children: [
               Expanded(
                 child: _MetricCard(
-                  label: 'OVERALL ACCURACY',
-                  value: '98.42',
+                  label: model.scoreMetricLabel.toUpperCase(),
+                  value: (model.validationScore * 100).toStringAsFixed(2),
                   unit: '%',
                   icon: Icons.adjust_rounded,
                   barColor: AppColors.accent,
-                  barValue: 0.9842,
+                  barValue: model.validationScore.clamp(0.0, 1.0),
                 ),
               ),
-              SizedBox(width: 16),
+              const SizedBox(width: 16),
               Expanded(
                 child: _MetricCard(
-                  label: 'WEIGHTED PRECISION',
-                  value: '0.976',
-                  icon: Icons.track_changes_rounded,
-                  barColor: Color(0xFF8A95A8),
-                  barValue: 0.976,
+                  label: 'AMOSTRAS VALIDAÇÃO',
+                  value: model.validationPredictions.length.toString(),
+                  icon: Icons.dataset_outlined,
+                  barColor: const Color(0xFF8A95A8),
+                  barValue: 1.0,
                 ),
               ),
-              SizedBox(width: 16),
+              const SizedBox(width: 16),
               Expanded(
                 child: _MetricCard(
-                  label: 'F1-SCORE (MACRO)',
-                  value: '0.981',
-                  icon: Icons.analytics_outlined,
-                  barColor: AppColors.success,
-                  barValue: 0.981,
+                  label: 'TIPO DE MODELO',
+                  value: model.modelType.label,
+                  icon: Icons.memory_outlined,
+                  barColor: AppColors.galaxy,
+                  barValue: 1.0,
+                  small: true,
                 ),
               ),
             ],
           ),
           const SizedBox(height: 20),
 
-          // ── Charts row ─────────────────────────────────────────────────────
-          IntrinsicHeight(
+          // ── Charts row ──────────────────────────────────────────────────────
+          SizedBox(
+            height: 400,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                // Clustered Light Curves (PCA scatter)
-                const Expanded(flex: 5, child: _LightCurvesCard()),
+                Expanded(
+                  flex: 5,
+                  child: _PredictionsScatterCard(model: model),
+                ),
                 const SizedBox(width: 16),
-                // Confusion Matrix
-                const Expanded(flex: 4, child: _ConfusionMatrixCard()),
+                Expanded(
+                  flex: 4,
+                  child: _ResidualHistogramCard(model: model),
+                ),
               ],
             ),
           ),
 
           const SizedBox(height: 20),
-
-          // ── AI Interpretability ────────────────────────────────────────────
-          const _AIInterpretabilityCard(),
+          _FeatureListCard(model: model),
         ],
       ),
     );
@@ -86,7 +136,9 @@ class DashboardResultsPage extends StatelessWidget {
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _HeroSection extends StatelessWidget {
-  const _HeroSection();
+  const _HeroSection({required this.model});
+
+  final StoredModel model;
 
   @override
   Widget build(BuildContext context) {
@@ -98,7 +150,7 @@ class _HeroSection extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                'NEURAL NET CLASSIFICATION',
+                '${model.task.value.toUpperCase()} ANALYSIS',
                 style: AppTextStyles.labelSm.copyWith(
                   color: AppColors.accent,
                   letterSpacing: 1.2,
@@ -108,10 +160,10 @@ class _HeroSection extends StatelessWidget {
               const SizedBox(height: 6),
               Row(
                 children: [
-                  Text('Classification Analysis ',
-                      style: AppTextStyles.displayMd),
+                  Text(model.modelType.label, style: AppTextStyles.displayMd),
+                  const SizedBox(width: 10),
                   Text(
-                    'v4.0.2',
+                    'Model #${model.id ?? '—'}',
                     style: AppTextStyles.displayMd.copyWith(
                       color: AppColors.textDisabled,
                       fontWeight: FontWeight.w400,
@@ -126,7 +178,7 @@ class _HeroSection extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.end,
           children: [
             Text(
-              'LAST BATCH',
+              'TARGET COLUMN',
               style: AppTextStyles.caption.copyWith(
                 letterSpacing: 0.8,
                 color: AppColors.textDisabled,
@@ -134,7 +186,7 @@ class _HeroSection extends StatelessWidget {
             ),
             const SizedBox(height: 2),
             Text(
-              '2023-11-24 // 04:12 UTC',
+              model.targetName,
               style: AppTextStyles.labelMd.copyWith(
                 color: AppColors.accent,
                 fontWeight: FontWeight.w600,
@@ -159,6 +211,7 @@ class _MetricCard extends StatelessWidget {
     required this.barColor,
     required this.barValue,
     this.unit = '',
+    this.small = false,
   });
 
   final String label;
@@ -167,6 +220,7 @@ class _MetricCard extends StatelessWidget {
   final IconData icon;
   final Color barColor;
   final double barValue;
+  final bool small;
 
   @override
   Widget build(BuildContext context) {
@@ -183,11 +237,13 @@ class _MetricCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                label,
-                style: AppTextStyles.labelSm.copyWith(
-                  letterSpacing: 0.6,
-                  color: AppColors.textDisabled,
+              Expanded(
+                child: Text(
+                  label,
+                  style: AppTextStyles.labelSm.copyWith(
+                    letterSpacing: 0.6,
+                    color: AppColors.textDisabled,
+                  ),
                 ),
               ),
               Icon(icon, size: 16, color: AppColors.textDisabled),
@@ -198,13 +254,14 @@ class _MetricCard extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.baseline,
             textBaseline: TextBaseline.alphabetic,
             children: [
-              Text(
-                value,
-                style: AppTextStyles.displayLg.copyWith(
-                  color: label.contains('ACCURACY')
-                      ? AppColors.accent
-                      : AppColors.textPrimary,
-                  fontSize: 32,
+              Flexible(
+                child: Text(
+                  value,
+                  style: AppTextStyles.displayLg.copyWith(
+                    color: AppColors.accent,
+                    fontSize: small ? 20 : 32,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               if (unit.isNotEmpty) ...[
@@ -236,86 +293,32 @@ class _MetricCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Clustered Light Curves — PCA Scatter Plot
+// Scatter — Predições vs Ground Truth
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _LightCurvesCard extends StatefulWidget {
-  const _LightCurvesCard();
+class _PredictionsScatterCard extends StatefulWidget {
+  const _PredictionsScatterCard({required this.model});
+
+  final StoredModel model;
 
   @override
-  State<_LightCurvesCard> createState() => _LightCurvesCardState();
+  State<_PredictionsScatterCard> createState() =>
+      _PredictionsScatterCardState();
 }
 
-class _LightCurvesCardState extends State<_LightCurvesCard>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _ctrl;
-  late final List<_ScatterPoint> _points;
-  _ScatterPoint? _hoveredPoint;
-
-  @override
-  void initState() {
-    super.initState();
-    _ctrl = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 20),
-    )..repeat();
-    _points = _generatePoints();
-  }
-
-  static List<_ScatterPoint> _generatePoints() {
-    final rng = math.Random(42);
-    final points = <_ScatterPoint>[];
-
-    // Stars cluster — top-left
-    for (int i = 0; i < 80; i++) {
-      points.add(_ScatterPoint(
-        x: 0.15 + rng.nextDouble() * 0.25,
-        y: 0.15 + rng.nextDouble() * 0.25,
-        type: _ObjectType.star,
-      ));
-    }
-    // Galaxies cluster — center
-    for (int i = 0; i < 100; i++) {
-      points.add(_ScatterPoint(
-        x: 0.35 + rng.nextDouble() * 0.30,
-        y: 0.35 + rng.nextDouble() * 0.30,
-        type: _ObjectType.galaxy,
-      ));
-    }
-    // Quasars cluster — bottom-right
-    for (int i = 0; i < 60; i++) {
-      points.add(_ScatterPoint(
-        x: 0.55 + rng.nextDouble() * 0.30,
-        y: 0.55 + rng.nextDouble() * 0.30,
-        type: _ObjectType.quasar,
-      ));
-    }
-    return points;
-  }
-
-  @override
-  void dispose() {
-    _ctrl.dispose();
-    super.dispose();
-  }
-
-  void _onHover(Offset local, Size size) {
-    _ScatterPoint? closest;
-    double minDist = 12;
-    for (final p in _points) {
-      final px = p.x * size.width;
-      final py = p.y * size.height;
-      final d = (local - Offset(px, py)).distance;
-      if (d < minDist) {
-        minDist = d;
-        closest = p;
-      }
-    }
-    if (closest != _hoveredPoint) setState(() => _hoveredPoint = closest);
-  }
+class _PredictionsScatterCardState extends State<_PredictionsScatterCard> {
+  int? _hoveredIdx;
 
   @override
   Widget build(BuildContext context) {
+    final preds = widget.model.validationPredictions;
+    final truth = widget.model.validationGroundTruth;
+
+    // Limita a 200 pontos para performance
+    final count = math.min(preds.length, 200);
+    final pts = List.generate(
+        count, (i) => _Pt(x: truth[i].toDouble(), y: preds[i].toDouble()));
+
     return Container(
       decoration: BoxDecoration(
         color: AppColors.surface1,
@@ -325,43 +328,30 @@ class _LightCurvesCardState extends State<_LightCurvesCard>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header
           Padding(
             padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Clustered Light Curves',
-                        style: AppTextStyles.h2),
-                    Text(
-                      'PCA Dimensionality Reduction on Spectral Data',
-                      style: AppTextStyles.bodySm,
-                    ),
-                  ],
+                Text('Predições vs. Real', style: AppTextStyles.h2),
+                Text(
+                  'Valores de validação — ${preds.length} amostras',
+                  style: AppTextStyles.bodySm,
                 ),
-                const Spacer(),
-                _Legend(color: AppColors.accent, label: 'STARS'),
-                const SizedBox(width: 14),
-                _Legend(color: AppColors.warning, label: 'GALAXIES'),
-                const SizedBox(width: 14),
-                _Legend(color: AppColors.success, label: 'QUASARS'),
               ],
             ),
           ),
           const SizedBox(height: 12),
-          // Scatter plot
           Expanded(
             child: LayoutBuilder(builder: (_, c) {
               return MouseRegion(
-                onHover: (e) => _onHover(e.localPosition, c.biggest),
-                onExit: (_) => setState(() => _hoveredPoint = null),
+                onHover: (e) => _onHover(e.localPosition, c.biggest, pts),
+                onExit: (_) => setState(() => _hoveredIdx = null),
                 child: CustomPaint(
                   size: c.biggest,
                   painter: _ScatterPainter(
-                    points: _points,
-                    hovered: _hoveredPoint,
+                    points: pts,
+                    hoveredIdx: _hoveredIdx,
                   ),
                 ),
               );
@@ -371,89 +361,122 @@ class _LightCurvesCardState extends State<_LightCurvesCard>
       ),
     );
   }
+
+  void _onHover(Offset local, Size size, List<_Pt> pts) {
+    if (pts.isEmpty) return;
+
+    final minX = pts.map((p) => p.x).reduce(math.min);
+    final maxX = pts.map((p) => p.x).reduce(math.max);
+    final minY = pts.map((p) => p.y).reduce(math.min);
+    final maxY = pts.map((p) => p.y).reduce(math.max);
+
+    const pad = 24.0;
+    final w = size.width - pad * 2;
+    final h = size.height - pad * 2;
+    final rangeX = (maxX - minX).abs().clamp(1e-9, double.infinity);
+    final rangeY = (maxY - minY).abs().clamp(1e-9, double.infinity);
+
+    int? closest;
+    double minDist = 14;
+    for (int i = 0; i < pts.length; i++) {
+      final px = pad + (pts[i].x - minX) / rangeX * w;
+      final py = pad + h - (pts[i].y - minY) / rangeY * h;
+      final d = (local - Offset(px, py)).distance;
+      if (d < minDist) {
+        minDist = d;
+        closest = i;
+      }
+    }
+    if (closest != _hoveredIdx) setState(() => _hoveredIdx = closest);
+  }
 }
 
-enum _ObjectType { star, galaxy, quasar }
-
-extension _ObjectTypeX on _ObjectType {
-  Color get color => switch (this) {
-        _ObjectType.star => AppColors.accent,
-        _ObjectType.galaxy => AppColors.warning,
-        _ObjectType.quasar => AppColors.success,
-      };
-
-  String get label => switch (this) {
-        _ObjectType.star => 'STAR',
-        _ObjectType.galaxy => 'GALAXY',
-        _ObjectType.quasar => 'QUASAR',
-      };
-}
-
-class _ScatterPoint {
+class _Pt {
   final double x;
   final double y;
-  final _ObjectType type;
-
-  const _ScatterPoint({required this.x, required this.y, required this.type});
+  const _Pt({required this.x, required this.y});
 }
 
 class _ScatterPainter extends CustomPainter {
-  const _ScatterPainter({required this.points, this.hovered});
+  const _ScatterPainter({required this.points, this.hoveredIdx});
 
-  final List<_ScatterPoint> points;
-  final _ScatterPoint? hovered;
+  final List<_Pt> points;
+  final int? hoveredIdx;
 
   @override
   void paint(Canvas canvas, Size size) {
-    for (final p in points) {
-      final px = p.x * size.width;
-      final py = p.y * size.height;
-      final isHov = p == hovered;
+    if (points.isEmpty) return;
 
-      final paint = Paint()
-        ..color = p.type.color.withOpacity(isHov ? 1.0 : 0.55)
-        ..style = PaintingStyle.fill;
+    const pad = 24.0;
+    final w = size.width - pad * 2;
+    final h = size.height - pad * 2;
 
-      canvas.drawCircle(Offset(px, py), isHov ? 5 : 3, paint);
+    final minX = points.map((p) => p.x).reduce(math.min);
+    final maxX = points.map((p) => p.x).reduce(math.max);
+    final minY = points.map((p) => p.y).reduce(math.min);
+    final maxY = points.map((p) => p.y).reduce(math.max);
+    final rangeX = (maxX - minX).abs().clamp(1e-9, double.infinity);
+    final rangeY = (maxY - minY).abs().clamp(1e-9, double.infinity);
+
+    double toX(double v) => pad + (v - minX) / rangeX * w;
+    double toY(double v) => pad + h - (v - minY) / rangeY * h;
+
+    // Área útil do gráfico — tudo dentro é clipado aqui
+    final plotRect = Rect.fromLTWH(pad, pad, w, h);
+
+    canvas.save();
+    canvas.clipRect(plotRect);
+
+    // Linha diagonal ideal (x == y) — calculada no espaço de dados unificado
+    // para nunca sair da área do gráfico independente do range de valores
+    final diagPaint = Paint()
+      ..color = AppColors.accent.withOpacity(0.3)
+      ..strokeWidth = 1
+      ..style = PaintingStyle.stroke;
+
+    // Calcula os extremos do range combinado (X e Y juntos) para a diagonal
+    final allMin = math.min(minX, minY);
+    final allMax = math.max(maxX, maxY);
+    // Clipa a diagonal ao range visível de cada eixo
+    final diagX0 = math.max(allMin, minX);
+    final diagX1 = math.min(allMax, maxX);
+    final diagY0 = math.max(allMin, minY);
+    final diagY1 = math.min(allMax, maxY);
+    // Ponto inicial: onde a diagonal entra na área visível
+    final startVal = math.max(diagX0, diagY0);
+    final endVal   = math.min(diagX1, diagY1);
+    if (startVal < endVal) {
+      canvas.drawLine(
+        Offset(toX(startVal), toY(startVal)),
+        Offset(toX(endVal),   toY(endVal)),
+        diagPaint,
+      );
     }
 
-    // Tooltip para hovered
-    if (hovered != null) {
-      final p = hovered!;
-      final px = p.x * size.width;
-      final py = p.y * size.height;
+    // Pontos
+    for (int i = 0; i < points.length; i++) {
+      final p = points[i];
+      final isHov = i == hoveredIdx;
+      final paint = Paint()
+        ..color = AppColors.accent.withOpacity(isHov ? 1.0 : 0.5)
+        ..style = PaintingStyle.fill;
+      canvas.drawCircle(Offset(toX(p.x), toY(p.y)), isHov ? 5 : 3, paint);
+    }
 
-      final rng = math.Random(p.x.hashCode ^ p.y.hashCode);
-      final objId =
-          'J${(1200 + rng.nextInt(99)).toString().padLeft(4, '0')}+${(3211 + rng.nextInt(99))}';
-      final conf = 95 + rng.nextInt(5);
-      final z = (0.1 + rng.nextDouble() * 0.5).toStringAsFixed(3);
+    canvas.restore(); // remove o clip — tooltip pode aparecer fora da área
 
+    // Tooltip (desenhado fora do clip para não ser cortado)
+    if (hoveredIdx != null) {
+      final p = points[hoveredIdx!];
       _drawTooltip(
-        canvas,
-        size,
-        Offset(px, py),
-        objId: objId,
-        confidence: conf,
-        type: p.type.label,
-        z: z,
-        color: p.type.color,
-      );
+          canvas, size, Offset(toX(p.x), toY(p.y)), real: p.x, pred: p.y);
     }
   }
 
-  void _drawTooltip(
-    Canvas canvas,
-    Size size,
-    Offset anchor, {
-    required String objId,
-    required int confidence,
-    required String type,
-    required String z,
-    required Color color,
-  }) {
-    const w = 160.0;
-    const h = 64.0;
+  void _drawTooltip(Canvas canvas, Size size, Offset anchor,
+      {required double real, required double pred}) {
+    const w = 150.0;
+    const h = 48.0;
     const pad = 10.0;
 
     double dx = anchor.dx + 10;
@@ -461,41 +484,32 @@ class _ScatterPainter extends CustomPainter {
     if (dx + w > size.width) dx = anchor.dx - w - 10;
     if (dy < 0) dy = anchor.dy + 10;
 
-    final rect =
-        RRect.fromRectAndRadius(Rect.fromLTWH(dx, dy, w, h), const Radius.circular(6));
+    final rect = RRect.fromRectAndRadius(
+        Rect.fromLTWH(dx, dy, w, h), const Radius.circular(6));
 
+    canvas.drawRRect(rect, Paint()..color = const Color(0xE6111827));
     canvas.drawRRect(
-      rect,
-      Paint()..color = const Color(0xE6111827),
-    );
-    canvas.drawRRect(
-      rect,
-      Paint()
-        ..color = color.withOpacity(0.4)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1,
-    );
+        rect,
+        Paint()
+          ..color = AppColors.accent.withOpacity(0.4)
+          ..style = PaintingStyle.stroke
+          ..strokeWidth = 1);
 
-    _drawText(canvas, 'OBJECT ID: $objId',
+    _txt(canvas, 'Real: ${real.toStringAsFixed(4)}',
         Offset(dx + pad, dy + pad), 10, const Color(0xFFE8EDF5));
-    _drawText(canvas, 'Confidence: $confidence%',
-        Offset(dx + pad, dy + pad + 14), 10, const Color(0xFF8A95A8));
-    _drawText(canvas, type,
-        Offset(dx + pad, dy + pad + 28), 10, color);
-    _drawText(canvas, 'z = $z',
-        Offset(dx + pad + 68, dy + pad + 28), 10, const Color(0xFF8A95A8));
+    _txt(canvas, 'Pred: ${pred.toStringAsFixed(4)}',
+        Offset(dx + pad, dy + pad + 16), 10, AppColors.accent);
   }
 
-  void _drawText(Canvas canvas, String text, Offset offset, double size, Color color) {
+  void _txt(Canvas canvas, String text, Offset offset, double size, Color color) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
         style: TextStyle(
-          fontSize: size,
-          color: color,
-          fontFamily: 'Inter',
-          fontWeight: FontWeight.w500,
-        ),
+            fontSize: size,
+            color: color,
+            fontFamily: 'Inter',
+            fontWeight: FontWeight.w500),
       ),
       textDirection: TextDirection.ltr,
     )..layout();
@@ -503,68 +517,51 @@ class _ScatterPainter extends CustomPainter {
   }
 
   @override
-  bool shouldRepaint(_ScatterPainter old) => old.hovered != hovered;
-}
-
-class _Legend extends StatelessWidget {
-  const _Legend({required this.color, required this.label});
-
-  final Color color;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 7,
-          height: 7,
-          decoration: BoxDecoration(
-            color: color,
-            shape: BoxShape.circle,
-          ),
-        ),
-        const SizedBox(width: 5),
-        Text(
-          label,
-          style: AppTextStyles.caption.copyWith(
-            letterSpacing: 0.4,
-            color: AppColors.textSecondary,
-          ),
-        ),
-      ],
-    );
-  }
+  bool shouldRepaint(_ScatterPainter old) => old.hoveredIdx != hoveredIdx;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Confusion Matrix
+// Histograma de resíduos
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _ConfusionMatrixCard extends StatelessWidget {
-  const _ConfusionMatrixCard();
+class _ResidualHistogramCard extends StatelessWidget {
+  const _ResidualHistogramCard({required this.model});
 
-  static const _predictedLabels = [
-    'PREDICTED\nSTAR',
-    'PREDICTED\nGALAXY',
-    'PREDICTED\nQUASAR',
-  ];
-  static const _actualLabels = [
-    'ACTUAL\nSTAR',
-    'ACTUAL\nGALAXY',
-    'ACTUAL\nQUASAR',
-  ];
-
-  // [row][col]
-  static const _matrix = [
-    [1242, 12, 3],
-    [8, 3104, 14],
-    [2, 6, 842],
-  ];
+  final StoredModel model;
 
   @override
   Widget build(BuildContext context) {
+    final preds = model.validationPredictions;
+    final truth = model.validationGroundTruth;
+
+    final residuals = List.generate(
+        math.min(preds.length, truth.length),
+        (i) => preds[i].toDouble() - truth[i].toDouble());
+
+    if (residuals.isEmpty) {
+      return Container(
+        decoration: BoxDecoration(
+          color: AppColors.surface1,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+          border: Border.all(color: AppColors.border),
+        ),
+        child: const Center(
+            child: Text('Sem dados', style: TextStyle(color: AppColors.textDisabled))),
+      );
+    }
+
+    // Histograma de 10 bins
+    final minR = residuals.reduce(math.min);
+    final maxR = residuals.reduce(math.max);
+    const bins = 10;
+    final range = (maxR - minR).abs().clamp(1e-9, double.infinity);
+    final counts = List<int>.filled(bins, 0);
+    for (final r in residuals) {
+      final idx = ((r - minR) / range * (bins - 1)).round().clamp(0, bins - 1);
+      counts[idx]++;
+    }
+    final maxCount = counts.reduce(math.max).clamp(1, double.infinity).toInt();
+
     return Container(
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
@@ -575,21 +572,50 @@ class _ConfusionMatrixCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          Text('Distribuição de Resíduos', style: AppTextStyles.h2),
           Text(
-            'CONFUSION MATRIX',
-            style: AppTextStyles.labelSm.copyWith(
-              letterSpacing: 1.0,
-              color: AppColors.textSecondary,
-              fontWeight: FontWeight.w700,
+            'Predição − Real (${residuals.length} amostras)',
+            style: AppTextStyles.bodySm,
+          ),
+          const SizedBox(height: 20),
+          Expanded(
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: List.generate(bins, (i) {
+                final h = counts[i] / maxCount;
+                return Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 2),
+                    child: Tooltip(
+                      message: 'n=${counts[i]}',
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.end,
+                        children: [
+                          AnimatedContainer(
+                            duration: const Duration(milliseconds: 400),
+                            height: h * 200,
+                            decoration: BoxDecoration(
+                              color: AppColors.accent.withOpacity(0.7),
+                              borderRadius: const BorderRadius.vertical(
+                                  top: Radius.circular(3)),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                );
+              }),
             ),
           ),
-          const SizedBox(height: 16),
-          Expanded(
-            child: _MatrixGrid(
-              predictedLabels: _predictedLabels,
-              actualLabels: _actualLabels,
-              matrix: _matrix,
-            ),
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(minR.toStringAsFixed(2), style: AppTextStyles.caption),
+              Text('0', style: AppTextStyles.caption),
+              Text(maxR.toStringAsFixed(2), style: AppTextStyles.caption),
+            ],
           ),
         ],
       ),
@@ -597,265 +623,90 @@ class _ConfusionMatrixCard extends StatelessWidget {
   }
 }
 
-class _MatrixGrid extends StatelessWidget {
-  const _MatrixGrid({
-    required this.predictedLabels,
-    required this.actualLabels,
-    required this.matrix,
-  });
-
-  final List<String> predictedLabels;
-  final List<String> actualLabels;
-  final List<List<int>> matrix;
-
-  @override
-  Widget build(BuildContext context) {
-    const headerStyle = TextStyle(
-      fontSize: 9,
-      fontWeight: FontWeight.w600,
-      color: AppColors.accent,
-      letterSpacing: 0.4,
-    );
-    const actualStyle = TextStyle(
-      fontSize: 9,
-      fontWeight: FontWeight.w600,
-      color: AppColors.textSecondary,
-      letterSpacing: 0.3,
-    );
-
-    return Column(
-      children: [
-        // Header row (predicted labels)
-        Row(
-          children: [
-            const SizedBox(width: 60), // espaço para actual labels
-            ...predictedLabels.map(
-              (l) => Expanded(
-                child: Text(l,
-                    style: headerStyle, textAlign: TextAlign.center),
-              ),
-            ),
-          ],
-        ),
-        const SizedBox(height: 8),
-        // Data rows
-        ...List.generate(matrix.length, (row) {
-          return Expanded(
-            child: Row(
-              children: [
-                // Actual label
-                SizedBox(
-                  width: 60,
-                  child: Text(actualLabels[row],
-                      style: actualStyle, textAlign: TextAlign.right),
-                ),
-                const SizedBox(width: 6),
-                // Cells
-                ...List.generate(matrix[row].length, (col) {
-                  final value = matrix[row][col];
-                  final isDiag = row == col;
-                  return Expanded(
-                    child: _MatrixCell(value: value, isDiagonal: isDiag),
-                  );
-                }),
-              ],
-            ),
-          );
-        }),
-      ],
-    );
-  }
-}
-
-class _MatrixCell extends StatefulWidget {
-  const _MatrixCell({required this.value, required this.isDiagonal});
-
-  final int value;
-  final bool isDiagonal;
-
-  @override
-  State<_MatrixCell> createState() => _MatrixCellState();
-}
-
-class _MatrixCellState extends State<_MatrixCell> {
-  bool _hovered = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final bg = widget.isDiagonal
-        ? AppColors.accent.withOpacity(_hovered ? 0.25 : 0.15)
-        : AppColors.surface2.withOpacity(_hovered ? 0.8 : 0.5);
-    final textColor = widget.isDiagonal
-        ? AppColors.accent
-        : AppColors.textSecondary;
-
-    return MouseRegion(
-      onEnter: (_) => setState(() => _hovered = true),
-      onExit: (_) => setState(() => _hovered = false),
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 120),
-        margin: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(4),
-          border: Border.all(
-            color: widget.isDiagonal
-                ? AppColors.accent.withOpacity(0.3)
-                : AppColors.border,
-          ),
-        ),
-        child: Center(
-          child: Text(
-            widget.value.toString(),
-            style: TextStyle(
-              fontSize: widget.isDiagonal ? 15 : 12,
-              fontWeight: widget.isDiagonal
-                  ? FontWeight.w700
-                  : FontWeight.w400,
-              color: textColor,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
-// AI Interpretability
+// Feature List
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _AIInterpretabilityCard extends StatefulWidget {
-  const _AIInterpretabilityCard();
+class _FeatureListCard extends StatelessWidget {
+  const _FeatureListCard({required this.model});
 
-  @override
-  State<_AIInterpretabilityCard> createState() =>
-      _AIInterpretabilityCardState();
-}
-
-class _AIInterpretabilityCardState extends State<_AIInterpretabilityCard> {
-  bool _expanded = false;
-
-  static const _features = [
-    ('U-BAND', 0.82),
-    ('G-BAND', 0.74),
-    ('R-BAND', 0.61),
-    ('I-BAND', 0.48),
-    ('Z-BAND', 0.33),
-    ('RA (DEG)', 0.12),
-    ('DEC (DEG)', 0.08),
-  ];
+  final StoredModel model;
 
   @override
   Widget build(BuildContext context) {
+    final features = model.featureNames ?? [];
+
     return Container(
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: AppColors.surface1,
         borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         border: Border.all(color: AppColors.border),
       ),
       child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Header — clicável para expandir
-          InkWell(
-            onTap: () => setState(() => _expanded = !_expanded),
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: 20, vertical: 16),
-              child: Row(
-                children: [
-                  const Icon(Icons.build_outlined,
-                      size: 16, color: AppColors.accent),
-                  const SizedBox(width: 10),
-                  Text(
-                    'AI INTERPRETABILITY',
-                    style: AppTextStyles.labelMd.copyWith(
-                      letterSpacing: 0.8,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  AnimatedRotation(
-                    turns: _expanded ? 0.5 : 0,
-                    duration: const Duration(milliseconds: 200),
-                    child: const Icon(Icons.keyboard_arrow_down_rounded,
-                        size: 18, color: AppColors.textSecondary),
-                  ),
-                ],
-              ),
+          Row(
+            children: [
+              const Icon(Icons.list_alt_rounded,
+                  size: 16, color: AppColors.accent),
+              const SizedBox(width: 8),
+              Text('Features Utilizadas', style: AppTextStyles.h2),
+              const Spacer(),
+              if (features.isNotEmpty)
+                Text(
+                  '${features.length} colunas',
+                  style: AppTextStyles.caption,
+                ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          if (features.isEmpty)
+            Text('Todas as colunas disponíveis foram utilizadas.',
+                style: AppTextStyles.bodySm)
+          else
+            Wrap(
+              spacing: 8,
+              runSpacing: 8,
+              children: features
+                  .map((f) => _FeatureChip(label: f,
+                      isTarget: f == model.targetName))
+                  .toList(),
             ),
-          ),
-
-          // Conteúdo expandível — feature importance
-          AnimatedSize(
-            duration: const Duration(milliseconds: 250),
-            curve: Curves.easeInOut,
-            child: _expanded
-                ? Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Divider(color: AppColors.border),
-                        const SizedBox(height: 12),
-                        Text(
-                          'Feature Importance (SHAP values)',
-                          style: AppTextStyles.h3,
-                        ),
-                        const SizedBox(height: 16),
-                        ..._features.map((f) => Padding(
-                              padding: const EdgeInsets.only(bottom: 10),
-                              child: _FeatureBar(
-                                  label: f.$1, value: f.$2),
-                            )),
-                      ],
-                    ),
-                  )
-                : const SizedBox.shrink(),
-          ),
         ],
       ),
     );
   }
 }
 
-class _FeatureBar extends StatelessWidget {
-  const _FeatureBar({required this.label, required this.value});
+class _FeatureChip extends StatelessWidget {
+  const _FeatureChip({required this.label, required this.isTarget});
 
   final String label;
-  final double value;
+  final bool isTarget;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: [
-        SizedBox(
-          width: 80,
-          child: Text(label, style: AppTextStyles.labelSm),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: isTarget
+            ? AppColors.warning.withOpacity(0.1)
+            : AppColors.surface2,
+        borderRadius: BorderRadius.circular(5),
+        border: Border.all(
+          color: isTarget
+              ? AppColors.warning.withOpacity(0.5)
+              : AppColors.border,
         ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(3),
-            child: LinearProgressIndicator(
-              value: value,
-              backgroundColor: AppColors.surface2,
-              valueColor:
-                  AlwaysStoppedAnimation(AppColors.accent.withOpacity(0.7)),
-              minHeight: 8,
-            ),
-          ),
+      ),
+      child: Text(
+        label,
+        style: AppTextStyles.caption.copyWith(
+          color: isTarget ? AppColors.warning : AppColors.textSecondary,
+          fontWeight: isTarget ? FontWeight.w700 : FontWeight.w400,
         ),
-        const SizedBox(width: 10),
-        Text(
-          value.toStringAsFixed(2),
-          style: AppTextStyles.labelSm.copyWith(
-            color: AppColors.accent,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
+      ),
     );
   }
 }

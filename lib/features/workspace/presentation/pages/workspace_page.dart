@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
@@ -5,51 +6,124 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novaml_app/core/theme/app_colors.dart';
 import 'package:novaml_app/core/theme/app_spacing.dart';
 import 'package:novaml_app/core/theme/app_text_styles.dart';
+import 'package:novaml_app/features/projects/domain/models/project_model.dart';
 import 'package:novaml_app/shared/providers/navigation_provider.dart';
+import 'package:novaml_app/shared/providers/projects_provider.dart';
 import 'package:novaml_app/shared/widgets/indicators/system_status_bar.dart';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Page
 // ─────────────────────────────────────────────────────────────────────────────
 
-class WorkspacePage extends StatefulWidget {
+class WorkspacePage extends ConsumerStatefulWidget {
   const WorkspacePage({super.key});
 
   @override
-  State<WorkspacePage> createState() => _WorkspacePageState();
+  ConsumerState<WorkspacePage> createState() => _WorkspacePageState();
 }
 
-class _WorkspacePageState extends State<WorkspacePage> {
+class _WorkspacePageState extends ConsumerState<WorkspacePage> {
   // ── Config state ─────────────────────────────────────────────────────────
   double _trainSplit = 0.80;
   int _selectedAlgorithm = 0;
 
-  static const _algorithms = [
-    'XGBoost Regressor Selected',
-    'Random Forest',
-    'Multi-Layer Perceptron',
-  ];
+  /// Apenas algoritmos suportados pelo backend (ModelType da API).
+  static const _algorithmEnums = ProjectAlgorithm.values; // linearRegression, decisionTree
 
   // ── CSV state ─────────────────────────────────────────────────────────────
   List<String>? _csvHeaders;
   List<List<String>>? _csvRows;
   Set<int> _useColumns = {};
+  Set<int> _nonNumericColumns = {};   // colunas que não são numéricas
   int? _targetColumn;
   bool _csvLoading = false;
   String? _csvFileName;
+  String? _csvPath;
 
-  static const int _maxDisplayRows = 100;
+  static const int _maxDisplayRows = 10;
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Lifecycle
+  // ─────────────────────────────────────────────────────────────────────────
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) => _loadFromProject());
+  }
+
+  /// Carrega o estado persistido do projeto selecionado.
+  Future<void> _loadFromProject() async {
+    final project = ref.read(selectedProjectProvider);
+    if (project == null) return;
+
+    // Algoritmo
+    final algIdx = _algorithmEnums.indexOf(project.algorithm);
+    setState(() {
+      _trainSplit = project.trainSplit;
+      _selectedAlgorithm = algIdx >= 0 ? algIdx : 0;
+    });
+
+    // CSV — recarrega o arquivo se o caminho ainda é válido
+    final csvPath = project.csvPath;
+    if (csvPath != null && File(csvPath).existsSync()) {
+      await _loadCsvFromPath(csvPath, project: project);
+    }
+  }
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // Auto-save
+  // ─────────────────────────────────────────────────────────────────────────
+
+  Future<void> _persist() async {
+    final project = ref.read(selectedProjectProvider);
+    if (project?.id == null) return;
+    final repo = ref.read(projectRepositoryProvider);
+
+    // Serializa use_columns como JSON de nomes de coluna
+    String? useColumnsJson;
+    if (_csvHeaders != null && _useColumns.isNotEmpty) {
+      final names = _useColumns
+          .where((i) => i < _csvHeaders!.length)
+          .map((i) => _csvHeaders![i])
+          .toList();
+      useColumnsJson = jsonEncode(names);
+    }
+
+    final targetName = (_targetColumn != null &&
+            _csvHeaders != null &&
+            _targetColumn! < _csvHeaders!.length)
+        ? _csvHeaders![_targetColumn!]
+        : null;
+
+    await repo.saveWorkspaceConfig(
+      id:             project!.id!,
+      trainSplit:     _trainSplit,
+      algorithm:      _algorithmEnums[_selectedAlgorithm],
+      targetColumn:   targetName,
+      useColumnsJson: useColumnsJson,
+      csvPath:        _csvPath,
+      storageMb: _csvPath != null
+          ? (File(_csvPath!).lengthSync() / (1024 * 1024))
+          : null,
+    );
+
+    // Atualiza o selectedProject em memória
+    final updated = await repo.getById(project.id!);
+    if (updated != null && mounted) {
+      ref.read(selectedProjectProvider.notifier).state = updated;
+      ref.read(projectsProvider.notifier).refresh();
+    }
+  }
 
   // ─────────────────────────────────────────────────────────────────────────
   // CSV parsing
   // ─────────────────────────────────────────────────────────────────────────
 
-  /// Parser CSV simples que suporta campos entre aspas com vírgulas internas.
   List<String> _parseCsvLine(String line) {
     final result = <String>[];
     var inQuotes = false;
     final current = StringBuffer();
-
     for (int i = 0; i < line.length; i++) {
       final ch = line[i];
       if (ch == '"') {
@@ -65,9 +139,72 @@ class _WorkspacePageState extends State<WorkspacePage> {
     return result;
   }
 
+  /// Carrega CSV de um caminho já conhecido (restauração ao abrir projeto).
+  Future<void> _loadCsvFromPath(String path, {Project? project}) async {
+    setState(() => _csvLoading = true);
+    try {
+      final content = await File(path).readAsString();
+      final lines = content
+          .split('\n')
+          .map((l) => l.trimRight())
+          .where((l) => l.isNotEmpty)
+          .toList();
+      if (lines.isEmpty) { setState(() => _csvLoading = false); return; }
+
+      final headers = _parseCsvLine(lines.first);
+      final allRows = lines.skip(1).map(_parseCsvLine).toList();
+
+      // Restaurar USE/TRGT a partir dos nomes salvos
+      Set<int> useColumns;
+      int? targetColumn;
+
+      if (project?.useColumnsJson != null) {
+        final savedNames =
+            List<String>.from(jsonDecode(project!.useColumnsJson!));
+        useColumns = headers
+            .asMap()
+            .entries
+            .where((e) => savedNames.contains(e.value))
+            .map((e) => e.key)
+            .toSet();
+      } else {
+        useColumns = Set.from(List.generate(headers.length, (i) => i));
+      }
+
+      if (project?.targetColumn != null) {
+        final idx = headers.indexOf(project!.targetColumn!);
+        targetColumn = idx >= 0 ? idx : null;
+      }
+
+      // Detecta colunas não-numéricas — scikit-learn não aceita strings.
+      final nonNumeric = <int>{};
+      for (int col = 0; col < headers.length; col++) {
+        final sample = allRows
+            .take(20)
+            .map((r) => col < r.length ? r[col].trim() : '')
+            .where((v) => v.isNotEmpty);
+        final hasNonNumeric =
+            sample.any((v) => double.tryParse(v) == null);
+        if (hasNonNumeric) nonNumeric.add(col);
+      }
+
+      setState(() {
+        _csvPath            = path;
+        _csvFileName        = path.split(Platform.pathSeparator).last;
+        _csvHeaders         = headers;
+        _csvRows            = allRows;
+        _useColumns         = useColumns;
+        _nonNumericColumns  = nonNumeric;
+        _targetColumn       = targetColumn;
+        _csvLoading         = false;
+      });
+    } catch (_) {
+      setState(() => _csvLoading = false);
+    }
+  }
+
   Future<void> _pickCsvFile() async {
     setState(() => _csvLoading = true);
-
     try {
       final result = await FilePicker.platform.pickFiles(
         type: FileType.custom,
@@ -75,51 +212,21 @@ class _WorkspacePageState extends State<WorkspacePage> {
         allowMultiple: false,
         dialogTitle: 'Selecione um arquivo CSV',
       );
-
-      if (result == null || result.files.isEmpty) {
+      if (result == null || result.files.isEmpty || result.files.single.path == null) {
         setState(() => _csvLoading = false);
         return;
       }
-
-      final path = result.files.single.path;
-      if (path == null) {
-        setState(() => _csvLoading = false);
-        return;
-      }
-
-      final content = await File(path).readAsString();
-      final lines = content
-          .split('\n')
-          .map((l) => l.trimRight())
-          .where((l) => l.isNotEmpty)
-          .toList();
-
-      if (lines.isEmpty) {
-        setState(() => _csvLoading = false);
-        return;
-      }
-
-      final headers = _parseCsvLine(lines.first);
-      final allRows = lines.skip(1).map(_parseCsvLine).toList();
-
-      setState(() {
-        _csvFileName = result.files.single.name;
-        _csvHeaders = headers;
-        _csvRows = allRows;
-        // Por padrão: todos os campos em USE, nenhum como TRGT
-        _useColumns = Set.from(List.generate(headers.length, (i) => i));
-        _targetColumn = null;
-        _csvLoading = false;
-      });
+      final path = result.files.single.path!;
+      await _loadCsvFromPath(path);
+      _csvPath = path;
+      await _persist();
     } catch (e) {
       setState(() => _csvLoading = false);
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Erro ao ler o arquivo: $e'),
-            backgroundColor: AppColors.error,
-          ),
-        );
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Erro ao ler o arquivo: $e'),
+          backgroundColor: AppColors.error,
+        ));
       }
     }
   }
@@ -163,17 +270,27 @@ class _WorkspacePageState extends State<WorkspacePage> {
                     flex: 4,
                     child: _PartitioningCard(
                       trainSplit: _trainSplit,
-                      onChanged: (v) => setState(() => _trainSplit = v),
+                      onChanged: (v) {
+                        setState(() => _trainSplit = v);
+                        _persist();
+                      },
                     ),
                   ),
                   const SizedBox(width: 16),
                   Expanded(
                     flex: 4,
                     child: _AlgorithmCard(
-                      algorithms: _algorithms,
+                      algorithms: _algorithmEnums
+                          .map((a) => a.label)
+                          .toList(),
+                      descriptions: _algorithmEnums
+                          .map((a) => a.description)
+                          .toList(),
                       selectedIndex: _selectedAlgorithm,
-                      onSelect: (i) =>
-                          setState(() => _selectedAlgorithm = i),
+                      onSelect: (i) {
+                        setState(() => _selectedAlgorithm = i);
+                        _persist();
+                      },
                     ),
                   ),
                 ],
@@ -190,6 +307,7 @@ class _WorkspacePageState extends State<WorkspacePage> {
                   rows: displayRows,
                   totalRows: totalRows,
                   useColumns: _useColumns,
+                  nonNumericColumns: _nonNumericColumns,
                   targetColumn: _targetColumn,
                   onUseToggle: (col, value) {
                     setState(() {
@@ -197,13 +315,15 @@ class _WorkspacePageState extends State<WorkspacePage> {
                         _useColumns.add(col);
                       } else {
                         _useColumns.remove(col);
-                        // Se era o TRGT, limpa
                         if (_targetColumn == col) _targetColumn = null;
                       }
                     });
+                    _persist();
                   },
-                  onTargetSelect: (col) =>
-                      setState(() => _targetColumn = col),
+                  onTargetSelect: (col) {
+                    setState(() => _targetColumn = col);
+                    _persist();
+                  },
                 ),
             ],
           ),
@@ -463,11 +583,13 @@ class _PartitioningCard extends StatelessWidget {
 class _AlgorithmCard extends StatelessWidget {
   const _AlgorithmCard({
     required this.algorithms,
+    required this.descriptions,
     required this.selectedIndex,
     required this.onSelect,
   });
 
   final List<String> algorithms;
+  final List<String> descriptions;
   final int selectedIndex;
   final ValueChanged<int> onSelect;
 
@@ -490,12 +612,15 @@ class _AlgorithmCard extends StatelessWidget {
               const SizedBox(width: 8),
               Text('Algorithm Selection', style: AppTextStyles.h3),
               const Spacer(),
-              const _SmallBadge(label: 'AUTO-TUNING READY'),
+              const _SmallBadge(label: 'API SUPPORTED'),
             ],
           ),
           const SizedBox(height: 16),
           ...algorithms.asMap().entries.map((e) => _AlgorithmItem(
                 label: e.value,
+                description: e.key < descriptions.length
+                    ? descriptions[e.key]
+                    : null,
                 selected: e.key == selectedIndex,
                 onTap: () => onSelect(e.key),
               )),
@@ -510,9 +635,11 @@ class _AlgorithmItem extends StatefulWidget {
     required this.label,
     required this.selected,
     required this.onTap,
+    this.description,
   });
 
   final String label;
+  final String? description;
   final bool selected;
   final VoidCallback onTap;
 
@@ -552,16 +679,30 @@ class _AlgorithmItemState extends State<_AlgorithmItem> {
               ),
             ),
           ),
-          child: Text(
-            widget.label,
-            style: AppTextStyles.bodyMd.copyWith(
-              color: widget.selected
-                  ? AppColors.textPrimary
-                  : AppColors.textSecondary,
-              fontWeight: widget.selected
-                  ? FontWeight.w600
-                  : FontWeight.w400,
-            ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.label,
+                style: AppTextStyles.bodyMd.copyWith(
+                  color: widget.selected
+                      ? AppColors.textPrimary
+                      : AppColors.textSecondary,
+                  fontWeight: widget.selected
+                      ? FontWeight.w600
+                      : FontWeight.w400,
+                ),
+              ),
+              if (widget.description != null && widget.selected) ...[
+                const SizedBox(height: 4),
+                Text(
+                  widget.description!,
+                  style: AppTextStyles.caption.copyWith(
+                    color: AppColors.textDisabled,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
@@ -633,12 +774,13 @@ class _SpectralEmpty extends StatelessWidget {
 // Spectral — Tabela com dados reais
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SpectralPreview extends StatelessWidget {
+class _SpectralPreview extends StatefulWidget {
   const _SpectralPreview({
     required this.headers,
     required this.rows,
     required this.totalRows,
     required this.useColumns,
+    required this.nonNumericColumns,
     required this.targetColumn,
     required this.onUseToggle,
     required this.onTargetSelect,
@@ -648,14 +790,28 @@ class _SpectralPreview extends StatelessWidget {
   final List<List<String>> rows;
   final int totalRows;
   final Set<int> useColumns;
+  final Set<int> nonNumericColumns;
   final int? targetColumn;
   final void Function(int col, bool value) onUseToggle;
   final void Function(int col) onTargetSelect;
 
   @override
+  State<_SpectralPreview> createState() => _SpectralPreviewState();
+}
+
+class _SpectralPreviewState extends State<_SpectralPreview> {
+  final _scrollController = ScrollController();
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final showingCount = rows.length;
-    final colCount = headers.length;
+    final showingCount = widget.rows.length;
+    final colCount = widget.headers.length;
 
     return Container(
       decoration: BoxDecoration(
@@ -666,69 +822,102 @@ class _SpectralPreview extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // ── Table title bar ──────────────────────────────────────────────
+          // ── Title bar ────────────────────────────────────────────────────
           Padding(
-            padding: const EdgeInsets.symmetric(
-                horizontal: 20, vertical: 14),
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
             child: Row(
               children: [
                 const Icon(Icons.table_chart_outlined,
                     size: 16, color: AppColors.accent),
                 const SizedBox(width: 8),
-                Text('Spectral Data Preview',
-                    style: AppTextStyles.h3),
+                Text('Spectral Data Preview', style: AppTextStyles.h3),
                 const Spacer(),
                 _SmallBadge(
-                    label: 'ROWS: ${_formatCount(totalRows)}',
+                    label: 'ROWS: ${_formatCount(widget.totalRows)}',
                     muted: true),
                 const SizedBox(width: 8),
                 _SmallBadge(label: 'COLS: $colCount', muted: true),
-                if (showingCount < totalRows) ...[
-                  const SizedBox(width: 8),
-                  _SmallBadge(
-                    label: 'SHOWING: $showingCount',
-                    muted: true,
-                  ),
-                ],
+                const SizedBox(width: 8),
+                _SmallBadge(
+                    label: 'SHOWING: $showingCount', muted: true),
               ],
             ),
           ),
+          // ── Banner de aviso: colunas não-numéricas selecionadas ─────────
+          Builder(builder: (context) {
+            final badCols = widget.useColumns
+                .intersection(widget.nonNumericColumns)
+                .map((i) => i < widget.headers.length ? widget.headers[i] : '')
+                .where((n) => n.isNotEmpty)
+                .toList()
+              ..sort();
+            if (badCols.isEmpty) return const SizedBox.shrink();
+            return Container(
+              margin: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              decoration: BoxDecoration(
+                color: AppColors.warning.withOpacity(0.08),
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                border: Border.all(color: AppColors.warning.withOpacity(0.4)),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.warning_amber_rounded,
+                      size: 16, color: AppColors.warning),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'Colunas de texto selecionadas — scikit-learn não processa strings. '
+                      'Desmarque USE em: ${badCols.join(', ')}.',
+                      style: AppTextStyles.bodySm
+                          .copyWith(color: AppColors.warning),
+                    ),
+                  ),
+                ],
+              ),
+            );
+          }),
+          const SizedBox(height: 8),
           const Divider(height: 1, color: AppColors.border),
 
-          // ── Tabela horizontal com scroll ─────────────────────────────────
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // Header com USE/TRGT
-                _CsvHeaderRow(
-                  headers: headers,
-                  useColumns: useColumns,
-                  targetColumn: targetColumn,
-                  onUseToggle: onUseToggle,
-                  onTargetSelect: onTargetSelect,
-                ),
-                const Divider(height: 1, color: AppColors.border),
-
-                // Rows de dados
-                ...rows.asMap().entries.map((e) {
-                  final isLast = e.key == rows.length - 1;
-                  return Column(
-                    children: [
-                      _CsvDataRow(
-                        values: e.value,
-                        headers: headers,
-                        targetColumn: targetColumn,
-                        useColumns: useColumns,
-                      ),
-                      if (!isLast)
-                        const Divider(
-                            height: 1, color: AppColors.border),
-                    ],
-                  );
-                }),
-              ],
+          // ── Tabela com scroll horizontal + scrollbar visível ─────────────
+          Scrollbar(
+            controller: _scrollController,
+            thumbVisibility: true,
+            child: SingleChildScrollView(
+              controller: _scrollController,
+              scrollDirection: Axis.horizontal,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _CsvHeaderRow(
+                    headers: widget.headers,
+                    useColumns: widget.useColumns,
+                    nonNumericColumns: widget.nonNumericColumns,
+                    targetColumn: widget.targetColumn,
+                    onUseToggle: widget.onUseToggle,
+                    onTargetSelect: widget.onTargetSelect,
+                  ),
+                  const Divider(height: 1, color: AppColors.border),
+                  ...widget.rows.asMap().entries.map((e) {
+                    final isLast = e.key == widget.rows.length - 1;
+                    return Column(
+                      children: [
+                        _CsvDataRow(
+                          values: e.value,
+                          headers: widget.headers,
+                          targetColumn: widget.targetColumn,
+                          useColumns: widget.useColumns,
+                        ),
+                        if (!isLast)
+                          const Divider(
+                              height: 1, color: AppColors.border),
+                      ],
+                    );
+                  }),
+                ],
+              ),
             ),
           ),
         ],
@@ -751,6 +940,7 @@ class _CsvHeaderRow extends StatelessWidget {
   const _CsvHeaderRow({
     required this.headers,
     required this.useColumns,
+    required this.nonNumericColumns,
     required this.targetColumn,
     required this.onUseToggle,
     required this.onTargetSelect,
@@ -758,6 +948,7 @@ class _CsvHeaderRow extends StatelessWidget {
 
   final List<String> headers;
   final Set<int> useColumns;
+  final Set<int> nonNumericColumns;
   final int? targetColumn;
   final void Function(int, bool) onUseToggle;
   final void Function(int) onTargetSelect;
@@ -774,25 +965,45 @@ class _CsvHeaderRow extends StatelessWidget {
           final header = e.value;
           final isUsed = useColumns.contains(i);
           final isTarget = targetColumn == i;
+          final isNonNumeric = nonNumericColumns.contains(i);
 
           return SizedBox(
             width: _colWidth,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Nome da coluna
-                Text(
-                  header,
-                  style: AppTextStyles.labelSm.copyWith(
-                    color: isTarget
-                        ? AppColors.accent
-                        : AppColors.textSecondary,
-                    fontWeight: isTarget
-                        ? FontWeight.w700
-                        : FontWeight.w500,
-                    letterSpacing: 0.4,
-                  ),
-                  overflow: TextOverflow.ellipsis,
+                // Nome da coluna + badge de aviso se for texto
+                Row(
+                  children: [
+                    Flexible(
+                      child: Text(
+                        header,
+                        style: AppTextStyles.labelSm.copyWith(
+                          color: isTarget
+                              ? AppColors.accent
+                              : AppColors.textSecondary,
+                          fontWeight: isTarget
+                              ? FontWeight.w700
+                              : FontWeight.w500,
+                          letterSpacing: 0.4,
+                        ),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isNonNumeric) ...[
+                      const SizedBox(width: 4),
+                      Tooltip(
+                        message: 'Coluna de texto — incompatível com scikit-learn',
+                        child: Icon(
+                          Icons.warning_amber_rounded,
+                          size: 12,
+                          color: isUsed
+                              ? AppColors.warning
+                              : AppColors.textDisabled,
+                        ),
+                      ),
+                    ],
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Row(

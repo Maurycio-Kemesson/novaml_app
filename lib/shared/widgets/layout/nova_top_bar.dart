@@ -35,8 +35,8 @@ class NovaTopBar extends ConsumerWidget {
                 const SizedBox(width: 16),
                 _NewProjectButton(
                   onPressed: () => ref
-                      .read(appFlowProvider.notifier)
-                      .state = AppFlowState.workspace,
+                      .read(createProjectTriggerProvider.notifier)
+                      .state++,
                 ),
               ]),
             AppFlowState.workspace => _BackButton(
@@ -112,8 +112,29 @@ class _BrandSection extends StatelessWidget {
 
 // ─────────────────────────────────────────────────────────────────────────────
 
-class _SearchBar extends StatelessWidget {
+class _SearchBar extends ConsumerStatefulWidget {
   const _SearchBar();
+
+  @override
+  ConsumerState<_SearchBar> createState() => _SearchBarState();
+}
+
+class _SearchBarState extends ConsumerState<_SearchBar> {
+  late final TextEditingController _ctrl;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = TextEditingController(
+      text: ref.read(searchQueryProvider),
+    );
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -121,17 +142,26 @@ class _SearchBar extends StatelessWidget {
       width: 280,
       height: 38,
       child: TextField(
+        controller: _ctrl,
         style: AppTextStyles.bodyMd,
+        onChanged: (v) =>
+            ref.read(searchQueryProvider.notifier).state = v,
         decoration: InputDecoration(
           hintText: 'Search projects...',
-          hintStyle: AppTextStyles.bodyMd.copyWith(
-            color: AppColors.textDisabled,
-          ),
-          prefixIcon: const Icon(
-            Icons.search_rounded,
-            size: 18,
-            color: AppColors.textDisabled,
-          ),
+          hintStyle: AppTextStyles.bodyMd
+              .copyWith(color: AppColors.textDisabled),
+          prefixIcon: const Icon(Icons.search_rounded,
+              size: 18, color: AppColors.textDisabled),
+          suffixIcon: ref.watch(searchQueryProvider).isNotEmpty
+              ? IconButton(
+                  icon: const Icon(Icons.close_rounded,
+                      size: 14, color: AppColors.textDisabled),
+                  onPressed: () {
+                    _ctrl.clear();
+                    ref.read(searchQueryProvider.notifier).state = '';
+                  },
+                )
+              : null,
           filled: true,
           fillColor: AppColors.surface2,
           contentPadding:

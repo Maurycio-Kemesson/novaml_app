@@ -69,19 +69,14 @@ class _BrandSection extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        // Logo grid icon
-        Container(
-          width: 40,
-          height: 40,
-          decoration: BoxDecoration(
-            color: AppColors.surface2,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: AppColors.borderActive),
-          ),
-          child: const Icon(
-            Icons.grid_view_rounded,
-            size: 20,
-            color: AppColors.accent,
+        // Logo da aplicação
+        ClipRRect(
+          borderRadius: BorderRadius.circular(8),
+          child: Image.asset(
+            'assets/logo.png',
+            width: 40,
+            height: 40,
+            fit: BoxFit.contain,
           ),
         ),
         const SizedBox(width: 12),

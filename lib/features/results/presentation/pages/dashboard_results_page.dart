@@ -112,7 +112,9 @@ class _ResultsDashboard extends StatelessWidget {
               children: [
                 Expanded(
                   flex: 5,
-                  child: _PredictionsScatterCard(model: model),
+                  child: model.task == ApiTask.classification
+                      ? _ConfusionMatrixCard(model: model)
+                      : _PredictionsScatterCard(model: model),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
@@ -293,7 +295,7 @@ class _MetricCard extends StatelessWidget {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Scatter — Predições vs Ground Truth
+// Scatter — Predições vs Ground Truth (regressão)
 // ─────────────────────────────────────────────────────────────────────────────
 
 class _PredictionsScatterCard extends StatefulWidget {
@@ -369,18 +371,22 @@ class _PredictionsScatterCardState extends State<_PredictionsScatterCard> {
     final maxX = pts.map((p) => p.x).reduce(math.max);
     final minY = pts.map((p) => p.y).reduce(math.min);
     final maxY = pts.map((p) => p.y).reduce(math.max);
+    final rawRangeX = (maxX - minX).abs().clamp(1e-9, double.infinity);
+    final rawRangeY = (maxY - minY).abs().clamp(1e-9, double.infinity);
+    final axMinX = minX - rawRangeX * 0.1;
+    final axMinY = minY - rawRangeY * 0.1;
+    final rangeX = rawRangeX * 1.2;
+    final rangeY = rawRangeY * 1.2;
 
     const pad = 24.0;
     final w = size.width - pad * 2;
     final h = size.height - pad * 2;
-    final rangeX = (maxX - minX).abs().clamp(1e-9, double.infinity);
-    final rangeY = (maxY - minY).abs().clamp(1e-9, double.infinity);
 
     int? closest;
     double minDist = 14;
     for (int i = 0; i < pts.length; i++) {
-      final px = pad + (pts[i].x - minX) / rangeX * w;
-      final py = pad + h - (pts[i].y - minY) / rangeY * h;
+      final px = pad + (pts[i].x - axMinX) / rangeX * w;
+      final py = pad + h - (pts[i].y - axMinY) / rangeY * h;
       final d = (local - Offset(px, py)).distance;
       if (d < minDist) {
         minDist = d;
@@ -415,40 +421,40 @@ class _ScatterPainter extends CustomPainter {
     final maxX = points.map((p) => p.x).reduce(math.max);
     final minY = points.map((p) => p.y).reduce(math.min);
     final maxY = points.map((p) => p.y).reduce(math.max);
-    final rangeX = (maxX - minX).abs().clamp(1e-9, double.infinity);
-    final rangeY = (maxY - minY).abs().clamp(1e-9, double.infinity);
+    final rawRangeX = (maxX - minX).abs().clamp(1e-9, double.infinity);
+    final rawRangeY = (maxY - minY).abs().clamp(1e-9, double.infinity);
 
-    double toX(double v) => pad + (v - minX) / rangeX * w;
-    double toY(double v) => pad + h - (v - minY) / rangeY * h;
+    // 10% de margem para pontos não ficarem colados na borda
+    final marginX = rawRangeX * 0.1;
+    final marginY = rawRangeY * 0.1;
+    final axMinX = minX - marginX;
+    final axMaxX = maxX + marginX;
+    final axMinY = minY - marginY;
+    final axMaxY = maxY + marginY;
+    final rangeX = axMaxX - axMinX;
+    final rangeY = axMaxY - axMinY;
 
-    // Área útil do gráfico — tudo dentro é clipado aqui
+    double toX(double v) => pad + (v - axMinX) / rangeX * w;
+    double toY(double v) => pad + h - (v - axMinY) / rangeY * h;
+
+    // Área útil do gráfico
     final plotRect = Rect.fromLTWH(pad, pad, w, h);
 
     canvas.save();
     canvas.clipRect(plotRect);
 
-    // Linha diagonal ideal (x == y) — calculada no espaço de dados unificado
-    // para nunca sair da área do gráfico independente do range de valores
+    // Linha diagonal ideal (y == x)
     final diagPaint = Paint()
       ..color = AppColors.accent.withOpacity(0.3)
       ..strokeWidth = 1
       ..style = PaintingStyle.stroke;
 
-    // Calcula os extremos do range combinado (X e Y juntos) para a diagonal
-    final allMin = math.min(minX, minY);
-    final allMax = math.max(maxX, maxY);
-    // Clipa a diagonal ao range visível de cada eixo
-    final diagX0 = math.max(allMin, minX);
-    final diagX1 = math.min(allMax, maxX);
-    final diagY0 = math.max(allMin, minY);
-    final diagY1 = math.min(allMax, maxY);
-    // Ponto inicial: onde a diagonal entra na área visível
-    final startVal = math.max(diagX0, diagY0);
-    final endVal   = math.min(diagX1, diagY1);
-    if (startVal < endVal) {
+    final diagStart = math.max(axMinX, axMinY);
+    final diagEnd = math.min(axMaxX, axMaxY);
+    if (diagStart < diagEnd) {
       canvas.drawLine(
-        Offset(toX(startVal), toY(startVal)),
-        Offset(toX(endVal),   toY(endVal)),
+        Offset(toX(diagStart), toY(diagStart)),
+        Offset(toX(diagEnd), toY(diagEnd)),
         diagPaint,
       );
     }
@@ -463,13 +469,13 @@ class _ScatterPainter extends CustomPainter {
       canvas.drawCircle(Offset(toX(p.x), toY(p.y)), isHov ? 5 : 3, paint);
     }
 
-    canvas.restore(); // remove o clip — tooltip pode aparecer fora da área
+    canvas.restore();
 
-    // Tooltip (desenhado fora do clip para não ser cortado)
+    // Tooltip (fora do clip)
     if (hoveredIdx != null) {
       final p = points[hoveredIdx!];
-      _drawTooltip(
-          canvas, size, Offset(toX(p.x), toY(p.y)), real: p.x, pred: p.y);
+      _drawTooltip(canvas, size, Offset(toX(p.x), toY(p.y)),
+          real: p.x, pred: p.y);
     }
   }
 
@@ -501,7 +507,8 @@ class _ScatterPainter extends CustomPainter {
         Offset(dx + pad, dy + pad + 16), 10, AppColors.accent);
   }
 
-  void _txt(Canvas canvas, String text, Offset offset, double size, Color color) {
+  void _txt(
+      Canvas canvas, String text, Offset offset, double size, Color color) {
     final tp = TextPainter(
       text: TextSpan(
         text: text,
@@ -534,8 +541,7 @@ class _ResidualHistogramCard extends StatelessWidget {
     final preds = model.validationPredictions;
     final truth = model.validationGroundTruth;
 
-    final residuals = List.generate(
-        math.min(preds.length, truth.length),
+    final residuals = List.generate(math.min(preds.length, truth.length),
         (i) => preds[i].toDouble() - truth[i].toDouble());
 
     if (residuals.isEmpty) {
@@ -546,7 +552,8 @@ class _ResidualHistogramCard extends StatelessWidget {
           border: Border.all(color: AppColors.border),
         ),
         child: const Center(
-            child: Text('Sem dados', style: TextStyle(color: AppColors.textDisabled))),
+            child: Text('Sem dados',
+                style: TextStyle(color: AppColors.textDisabled))),
       );
     }
 
@@ -669,8 +676,8 @@ class _FeatureListCard extends StatelessWidget {
               spacing: 8,
               runSpacing: 8,
               children: features
-                  .map((f) => _FeatureChip(label: f,
-                      isTarget: f == model.targetName))
+                  .map((f) =>
+                      _FeatureChip(label: f, isTarget: f == model.targetName))
                   .toList(),
             ),
         ],
@@ -690,14 +697,12 @@ class _FeatureChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
       decoration: BoxDecoration(
-        color: isTarget
-            ? AppColors.warning.withOpacity(0.1)
-            : AppColors.surface2,
+        color:
+            isTarget ? AppColors.warning.withOpacity(0.1) : AppColors.surface2,
         borderRadius: BorderRadius.circular(5),
         border: Border.all(
-          color: isTarget
-              ? AppColors.warning.withOpacity(0.5)
-              : AppColors.border,
+          color:
+              isTarget ? AppColors.warning.withOpacity(0.5) : AppColors.border,
         ),
       ),
       child: Text(
@@ -707,6 +712,223 @@ class _FeatureChip extends StatelessWidget {
           fontWeight: isTarget ? FontWeight.w700 : FontWeight.w400,
         ),
       ),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Confusion Matrix — exibida para modelos de classificação
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _ConfusionMatrixCard extends StatelessWidget {
+  const _ConfusionMatrixCard({required this.model});
+
+  final StoredModel model;
+
+  /// Retorna o nome legível do label usando classLabels do modelo se disponível.
+  String _label(double v) {
+    final cl = model.classLabels;
+    if (cl != null) {
+      final name = cl[v.round()];
+      if (name != null) return name;
+    }
+    return 'C${v.toStringAsFixed(0)}';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final preds = model.validationPredictions;
+    final truth = model.validationGroundTruth;
+    final n = math.min(preds.length, truth.length);
+
+    // Labels únicos ordenados
+    final labels = <double>{
+      ...preds.map((e) => e.toDouble()),
+      ...truth.map((e) => e.toDouble()),
+    }.toList()
+      ..sort();
+    final k = labels.length;
+    final idx = {for (var i = 0; i < k; i++) labels[i]: i};
+
+    // matrix[real][predito]
+    final matrix = List.generate(k, (_) => List<int>.filled(k, 0));
+    for (int i = 0; i < n; i++) {
+      final ti = idx[truth[i].toDouble()];
+      final pi = idx[preds[i].toDouble()];
+      if (ti != null && pi != null) matrix[ti][pi]++;
+    }
+
+    final maxVal = matrix
+        .expand((r) => r)
+        .reduce(math.max)
+        .clamp(1, double.maxFinite)
+        .toInt();
+
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 16),
+      decoration: BoxDecoration(
+        color: AppColors.surface1,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+        border: Border.all(color: AppColors.border),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Matriz de Confusão', style: AppTextStyles.h2),
+          Text(
+            'Real × Predito — $n amostras',
+            style: AppTextStyles.bodySm,
+          ),
+          const SizedBox(height: 12),
+          // Header: labels das colunas (Predito)
+          Padding(
+            padding: const EdgeInsets.only(left: 56),
+            child: Row(
+              children: labels
+                  .map((l) => Expanded(
+                        child: Center(
+                          child: Text(
+                            _label(l),
+                            style: AppTextStyles.caption.copyWith(
+                              color: AppColors.textDisabled,
+                              fontSize: 10,
+                              letterSpacing: 0.4,
+                            ),
+                            textAlign: TextAlign.center,
+                          ),
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ),
+          const SizedBox(height: 4),
+          Expanded(
+            child: Row(
+              children: [
+                // Eixo Y: labels das linhas (Real)
+                SizedBox(
+                  width: 52,
+                  child: Column(
+                    children: labels
+                        .map((l) => Expanded(
+                              child: Center(
+                                child: Text(
+                                  _label(l),
+                                  style: AppTextStyles.caption.copyWith(
+                                    color: AppColors.textDisabled,
+                                    fontSize: 10,
+                                    letterSpacing: 0.4,
+                                  ),
+                                  textAlign: TextAlign.center,
+                                ),
+                              ),
+                            ))
+                        .toList(),
+                  ),
+                ),
+                // Células da matriz
+                Expanded(
+                  child: Column(
+                    children: List.generate(
+                      k,
+                      (row) => Expanded(
+                        child: Row(
+                          children: List.generate(k, (col) {
+                            final count = matrix[row][col];
+                            final ratio = count / maxVal;
+                            final isDiag = row == col;
+
+                            final bgColor = isDiag
+                                ? AppColors.accent
+                                    .withOpacity(0.1 + ratio * 0.7)
+                                : AppColors.error
+                                    .withOpacity(ratio.clamp(0.0, 1.0) * 0.55);
+
+                            final fgColor = isDiag && ratio > 0.35
+                                ? AppColors.accent
+                                : ratio > 0.4
+                                    ? AppColors.textPrimary
+                                    : AppColors.textSecondary;
+
+                            return Expanded(
+                              child: Container(
+                                margin: const EdgeInsets.all(2),
+                                decoration: BoxDecoration(
+                                  color: bgColor,
+                                  borderRadius: BorderRadius.circular(4),
+                                  border: isDiag
+                                      ? Border.all(
+                                          color:
+                                              AppColors.accent.withOpacity(0.35),
+                                          width: 1,
+                                        )
+                                      : null,
+                                ),
+                                child: Center(
+                                  child: Text(
+                                    _formatCount(count),
+                                    style: AppTextStyles.bodySm.copyWith(
+                                      color: fgColor,
+                                      fontWeight: isDiag
+                                          ? FontWeight.w700
+                                          : FontWeight.w400,
+                                      fontSize: 12,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            );
+                          }),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 10),
+          Row(
+            children: [
+              _LegendDot(color: AppColors.accent, label: 'Correto (diagonal)'),
+              const SizedBox(width: 16),
+              _LegendDot(
+                  color: AppColors.error, label: 'Erro de classificação'),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  String _formatCount(int n) {
+    if (n >= 1000) return '${(n / 1000).toStringAsFixed(1)}k';
+    return n.toString();
+  }
+}
+
+class _LegendDot extends StatelessWidget {
+  const _LegendDot({required this.color, required this.label});
+
+  final Color color;
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Container(
+          width: 8,
+          height: 8,
+          decoration: BoxDecoration(color: color, shape: BoxShape.circle),
+        ),
+        const SizedBox(width: 5),
+        Text(
+          label,
+          style: AppTextStyles.caption.copyWith(color: AppColors.textDisabled),
+        ),
+      ],
     );
   }
 }

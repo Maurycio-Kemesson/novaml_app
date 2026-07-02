@@ -7,6 +7,7 @@ enum NavSection {
   models,     // 1
   dashboard,  // 2
   monitoring, // 3
+  assistant,  // 4
 }
 
 extension NavSectionX on NavSection {
@@ -15,6 +16,7 @@ extension NavSectionX on NavSection {
         NavSection.models     => 'Modelos',
         NavSection.dashboard  => 'Dashboard',
         NavSection.monitoring => 'Monitoramento',
+        NavSection.assistant  => 'Assistente IA',
       };
 
   String get iconAsset => switch (this) {
@@ -22,6 +24,7 @@ extension NavSectionX on NavSection {
         NavSection.models     => 'layers',
         NavSection.dashboard  => 'bar_chart_2',
         NavSection.monitoring => 'activity',
+        NavSection.assistant  => 'bot',
       };
 }
 

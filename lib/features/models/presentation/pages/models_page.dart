@@ -266,23 +266,28 @@ class _ModelCardState extends ConsumerState<_ModelCard> {
   Future<void> _export(BuildContext context) async {
     if (m.id == null) return;
     setState(() => _exporting = true);
-    final path =
-        await ref.read(storedModelsProvider.notifier).exportModel(m.id!);
-    if (!mounted) return;
-    setState(() => _exporting = false);
 
-    if (path != null) {
-      // Copia o path para o clipboard e mostra snackbar
-      await Clipboard.setData(ClipboardData(text: path));
+    try {
+      final path =
+          await ref.read(storedModelsProvider.notifier).exportModel(m.id!);
+      if (!mounted) return;
+      setState(() => _exporting = false);
+
+      if (path != null && path.isNotEmpty) {
+        await Clipboard.setData(ClipboardData(text: path));
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Exportado: $path\n(caminho copiado)'),
+          backgroundColor: AppColors.success,
+          duration: const Duration(seconds: 5),
+        ));
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _exporting = false);
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-        content: Text('Exportado: $path (caminho copiado)'),
-        backgroundColor: AppColors.success,
-        duration: const Duration(seconds: 4),
-      ));
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-        content: Text('Falha ao exportar o modelo.'),
+        content: Text('Falha ao exportar: $e'),
         backgroundColor: AppColors.error,
+        duration: const Duration(seconds: 6),
       ));
     }
   }

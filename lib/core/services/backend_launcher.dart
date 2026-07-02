@@ -54,6 +54,24 @@ class BackendLauncher {
     _state = BackendState.starting;
     _log('Iniciando backend NOVAML...');
 
+    // ── Verificar se já há algo na porta 8000 ──────────────────────────────
+    if (await _isPortOpen(8000)) {
+      _log('Porta 8000 já está em uso — verificando se é o novaml-api...');
+      final alreadyUp = await _waitReady(timeout: const Duration(seconds: 3));
+      if (alreadyUp) {
+        _state = BackendState.running;
+        _log('✓ Backend já está rodando em http://localhost:8000 (reaproveitado).');
+        return;
+      } else {
+        _state = BackendState.error;
+        _log('ERRO: Porta 8000 ocupada por outro processo.');
+        _log('Libere a porta e reinicie o app:');
+        _log('  netstat -ano | findstr :8000   → anote o PID');
+        _log('  taskkill /PID <numero> /F');
+        return;
+      }
+    }
+
     final cmd = await _resolveCommand();
     if (cmd == null) {
       _state = BackendState.error;
@@ -283,20 +301,25 @@ class BackendLauncher {
   // Utilitários
   // ─────────────────────────────────────────────────────────────────────────
 
+  Future<bool> _isPortOpen(int port) async {
+    try {
+      final socket = await Socket.connect(
+        'localhost',
+        port,
+        timeout: const Duration(milliseconds: 500),
+      );
+      await socket.close();
+      return true;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> _waitReady({required Duration timeout}) async {
     final deadline = DateTime.now().add(timeout);
     while (DateTime.now().isBefore(deadline)) {
-      try {
-        final socket = await Socket.connect(
-          'localhost',
-          8000,
-          timeout: const Duration(milliseconds: 500),
-        );
-        await socket.close();
-        return true;
-      } catch (_) {
-        await Future<void>.delayed(const Duration(milliseconds: 800));
-      }
+      if (await _isPortOpen(8000)) return true;
+      await Future<void>.delayed(const Duration(milliseconds: 800));
     }
     return false;
   }

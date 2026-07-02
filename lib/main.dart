@@ -6,6 +6,7 @@ import 'package:window_manager/window_manager.dart';
 import 'app/app.dart';
 import 'core/database/app_database.dart';
 import 'core/services/backend_launcher.dart';
+import 'core/services/chat_launcher.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -19,9 +20,10 @@ Future<void> main() async {
   // ── Banco de dados local ─────────────────────────────────────────────────
   await AppDatabase.instance.database;
 
-  // ── Inicia o backend Python em background ───────────────────────────────
+  // ── Inicia os serviços Python em background ─────────────────────────────
   // Não bloqueia a UI — o StatusDot mostra "iniciando" até ficar pronto
   BackendLauncher.instance.start();
+  ChatLauncher.instance.start(); // Assistente IA (RAG) — porta 8001
 
   // ── Janela desktop ───────────────────────────────────────────────────────
   await windowManager.ensureInitialized();

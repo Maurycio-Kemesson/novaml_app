@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:dio/dio.dart';
 import 'package:novaml_app/core/models/api_models.dart';
 
@@ -93,8 +94,27 @@ class NovaMLApiClient {
   }
 
   Future<String> exportModel(int modelId) async {
-    final res = await _dio.get<String>('/export/$modelId');
-    return res.data ?? '';
+    // responseType.plain evita que o Dio tente fazer JSON decode automaticamente,
+    // prevenindo ClassCastException quando o backend retorna Map mas tipamos String.
+    final res = await _dio.get(
+      '/export/$modelId',
+      options: Options(responseType: ResponseType.plain),
+    );
+    final raw = res.data?.toString() ?? '';
+
+    // Backend pode retornar string plana ("/path/to/model.pkl")
+    // ou JSON encapsulado ('{"path": "/path/to/model.pkl"}').
+    if (raw.trimLeft().startsWith('{')) {
+      try {
+        final decoded = jsonDecode(raw) as Map<String, dynamic>;
+        return (decoded['path'] ??
+                decoded['file_path'] ??
+                decoded['export_path'] ??
+                raw)
+            .toString();
+      } catch (_) {/* não é JSON válido — usa raw */}
+    }
+    return raw;
   }
 
   // ── Train ────────────────────────────────────────────────────────────────

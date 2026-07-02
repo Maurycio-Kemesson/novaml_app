@@ -1,5 +1,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:novaml_app/core/models/api_models.dart';
+import 'package:novaml_app/core/services/api_client.dart';
 import 'package:novaml_app/shared/providers/backend_provider.dart';
 
 /// Notifier de modelos treinados — consome GET/DELETE /models.
@@ -26,11 +27,16 @@ class StoredModelsNotifier extends AsyncNotifier<List<StoredModel>> {
     }
   }
 
+  /// Retorna o caminho do arquivo exportado, ou lança [Exception] com
+  /// a mensagem legível extraída da resposta do backend.
   Future<String?> exportModel(int id) async {
     try {
-      return await ref.read(apiClientProvider).exportModel(id);
-    } catch (_) {
-      return null;
+      final path = await ref.read(apiClientProvider).exportModel(id);
+      if (path.isEmpty) throw Exception('Backend retornou caminho vazio.');
+      return path;
+    } catch (e) {
+      // Usa extractError para obter o "detail" do JSON de erro do FastAPI
+      throw Exception(NovaMLApiClient.extractError(e));
     }
   }
 }

@@ -4,7 +4,40 @@ Frontend desktop da plataforma NOVAML, construído com Flutter para Windows. Per
 
 ---
 
-## Pré-requisitos
+## Instalação do Executável (Usuário Final)
+
+Esta é a forma mais simples de rodar o NOVAML — **não é necessário instalar Flutter, Dart, Python ou qualquer ferramenta de desenvolvimento**. O executável já embute o frontend e o backend prontos para uso.
+
+### Requisitos mínimos do computador
+
+| Item | Mínimo | Recomendado |
+|---|---|---|
+| Sistema operacional | Windows 10 64-bit (versão 1809+) | **Windows 11 64-bit** |
+| Arquitetura | x64 | x64 |
+| Processador | Dual-core 2 GHz | Quad-core 2.5 GHz+ |
+| Memória RAM | 4 GB | 8 GB+ |
+| Espaço em disco | 500 MB livres | 1 GB+ (datasets e modelos treinados aumentam o uso) |
+| Resolução de tela | 1024 × 700 | 1366 × 768 ou superior |
+| Permissões | Usuário padrão (sem admin) | — |
+| Rede | Não requer internet — tudo roda em `localhost` | — |
+
+> O NOVAML é desenvolvido e testado prioritariamente em **Windows 11**. Windows 10 64-bit é suportado como piso mínimo, mas pode exigir a atualização de componentes do sistema (Visual C++ Redistributable 2015-2022, normalmente já presente no Windows 11).
+
+### Passo a passo
+
+1. **Obtenha a pasta `release/`** deste repositório (`novaml_app/release/`) — ela contém `novaml_app.exe`, `novaml_api.exe` e todas as DLLs necessárias já centralizados juntos.
+2. **Copie a pasta inteira** para um local de sua preferência no computador (ex: `C:\NOVAML\`). Não é necessário instalar nada.
+3. **Não separe os arquivos**: `novaml_app.exe`, `novaml_api.exe` e as `.dll` precisam permanecer na mesma pasta — o frontend inicia o backend automaticamente como processo filho.
+4. **Execute `novaml_app.exe`** com duplo clique.
+5. Aguarde a inicialização automática do backend (leva alguns segundos). Você pode acompanhar o status na tela **Monitoramento**: o indicador fica verde quando o backend está pronto.
+6. Se o Windows SmartScreen exibir um aviso ("Windows protegeu o computador"), clique em **Mais informações → Executar assim mesmo** — isso ocorre porque o executável ainda não possui assinatura digital (comum em builds internos/PyInstaller).
+7. Pronto — crie um projeto e comece a treinar modelos. Nenhum dado é enviado para a internet; tudo roda localmente.
+
+> Detalhes sobre o conteúdo da pasta `release/` e como atualizá-la a cada nova versão estão em [`release/README.md`](release/README.md).
+
+---
+
+## Pré-requisitos (Desenvolvimento)
 
 - [Flutter SDK](https://docs.flutter.dev/get-started/install/windows) 3.22+
 - Dart SDK 3.3+
@@ -16,7 +49,7 @@ Frontend desktop da plataforma NOVAML, construído com Flutter para Windows. Per
 
 ---
 
-## Instalação
+## Instalação (Desenvolvimento)
 
 ### 1. Clonar o repositório
 
@@ -156,53 +189,4 @@ lib/
 │   ├── dashboard/                 # métricas e KPIs dos modelos
 │   ├── models/                    # listagem e gestão de modelos salvos
 │   ├── monitoring/                # status do sistema e do backend
-│   ├── projects/                  # CRUD de projetos (SQLite)
-│   ├── results/                   # tela de loading e dashboard pós-treino
-│   └── workspace/                 # configuração de dataset + treinamento
-├── shared/
-│   ├── providers/                 # providers Riverpod globais
-│   └── widgets/                   # componentes reutilizáveis
-└── main.dart                      # entrypoint (SQLite init + window setup)
-```
-
----
-
-## Tecnologias
-
-| Biblioteca | Uso |
-|-----------|-----|
-| [Flutter](https://flutter.dev/) | Framework UI multiplataforma |
-| [Riverpod](https://riverpod.dev/) | Gerenciamento de estado reativo |
-| [Dio](https://pub.dev/packages/dio) | Cliente HTTP para o backend |
-| [sqflite_ffi](https://pub.dev/packages/sqflite_common_ffi) | SQLite local para projetos (Windows) |
-| [window_manager](https://pub.dev/packages/window_manager) | Controle da janela desktop |
-| [fl_chart](https://pub.dev/packages/fl_chart) | Gráficos de performance |
-| [file_picker](https://pub.dev/packages/file_picker) | Seleção de arquivos CSV |
-| [Freezed](https://pub.dev/packages/freezed) | Modelos de dados imutáveis |
-| [google_fonts](https://pub.dev/packages/google_fonts) | Tipografia |
-
----
-
-## Problemas comuns
-
-| Erro | Causa | Solução |
-|------|-------|---------|
-| Backend offline (status vermelho) | FastAPI não está rodando | Execute `uvicorn main:app --reload` no repositório do backend |
-| `flutter doctor` reporta Visual Studio | Workload C++ ausente | Instale "Desktop development with C++" no Visual Studio Installer |
-| `MissingPluginException` | `flutter pub get` não foi executado | Rode `flutter pub get` e reinicie |
-| Tela em branco ao abrir | Resolução abaixo do mínimo | A janela exige pelo menos 1024 × 700 px |
-| `build_runner` falha | Arquivos gerados desatualizados | Rode `dart run build_runner build --delete-conflicting-outputs` |
-
----
-
-## Projeto
-
-Desenvolvido para o NOVAML — trabalho da disciplina de Engenharia de Software, UFC — Departamento de Computação.
-
-**Equipe:**
-- Davi Teixeira Silva — Quality Assurance
-- Jander Nunes Soares — Gerente de Projeto
-- Lazuli Costa de Andrade — Desenvolvedor Back-End
-- Leonardo Quezado de Meneses — IA Engineer
-- Maurycio Kemesson Nascimento Brito — Desenvolvedor Front-End
-- Nathalia Moura Cardoso — Desenvolvedor Front-End
+│ 

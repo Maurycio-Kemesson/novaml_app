@@ -44,9 +44,19 @@ class NovaMLApiClient {
               .join('; ');
         }
       }
-      if (data is String && data.isNotEmpty) return data;
+      if (data is String && data.isNotEmpty) {
+        // Erros 500 não tratados no backend retornam o traceback Python cru
+        // como corpo da resposta. Não expor isso na UI — é ilegível para o
+        // usuário e pode vazar caminhos internos do servidor.
+        final looksLikeTraceback =
+            data.contains('Traceback (most recent call last)') ||
+                data.length > 300;
+        if (!looksLikeTraceback) return data;
+      }
       final status = e.response?.statusCode;
-      return 'Servidor retornou HTTP $status';
+      return status != null
+          ? 'Erro interno no servidor (HTTP $status). Verifique os logs do backend.'
+          : 'Falha de comunicação com o servidor.';
     }
     return e.toString();
   }

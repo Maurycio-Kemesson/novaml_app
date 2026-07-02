@@ -1,0 +1,5 @@
+# Git LFS — binários do executável final (ver release/README.md)
+# Requer "git lfs install" (uma vez por máquina) antes do primeiro commit
+# desses arquivos. Ver instruções em release/README.md.
+release/*.exe filter=lfs diff=lfs merge=lfs -text
+release/*.dll filter=lfs diff=lfs merge=lfs -text

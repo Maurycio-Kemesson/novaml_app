@@ -15,8 +15,21 @@ release/
 ├── screen_retriever_plugin.dll
 ├── sqlite3.dll
 ├── window_manager_plugin.dll
-└── data/                   ← Criada em runtime: database.db + modelos .pkl
+└── data/
+    ├── flutter_assets/     ← OBRIGATÓRIO — assets do Flutter (fontes, ícones, imagens)
+    ├── icudtl.dat          ← OBRIGATÓRIO — dados ICU exigidos pelo motor Flutter
+    ├── app.so              ← OBRIGATÓRIO — snapshot AOT do código Dart
+    ├── database.db         ← Criado em runtime pelo backend (modelos treinados)
+    └── models/             ← Criado em runtime pelo backend (arquivos .pkl exportados)
 ```
+
+> **Atenção:** `flutter_assets/`, `icudtl.dat` e `app.so` vêm do próprio build
+> do Flutter (`build\windows\x64\runner\Release\data\`) e são **obrigatórios**
+> para o motor do Flutter inicializar. Sem eles, `novaml_app.exe` falha
+> silenciosamente ao abrir — nenhuma janela, nenhum erro, nenhum processo
+> visível no Gerenciador de Tarefas. O backend usa a **mesma** pasta `data/`
+> para gravar `database.db` e `models/` em runtime — os dois convivem juntos
+> sem conflito.
 
 ## Como rodar
 
@@ -25,8 +38,8 @@ release/
 3. O app detecta o `novaml_api.exe` na mesma pasta e o inicia automaticamente
    como processo filho — **não é necessário ter Python instalado**.
 
-> Não mova ou apague nenhum `.dll`/`.exe` individualmente: eles precisam
-> permanecer juntos na mesma pasta para o app funcionar.
+> Não mova ou apague nenhum `.dll`/`.exe`/arquivo de `data/` individualmente:
+> eles precisam permanecer juntos na mesma pasta para o app funcionar.
 
 ## Atualizando o executável desta pasta
 
@@ -34,33 +47,4 @@ Sempre que houver uma nova versão:
 
 **Frontend mudou:**
 ```cmd
-cd novaml_app
-flutter build windows --release
-copy /Y build\windows\x64\runner\Release\novaml_app.exe release\
-xcopy /y build\windows\x64\runner\Release\*.dll release\
-```
-
-**Backend mudou** (pegue sempre o `.exe` mais recente gerado no repositório
-`novaml-api`):
-```cmd
-cd ..\novaml-api
-build_backend.bat
-copy /Y dist\novaml_api.exe ..\novaml_app\release\novaml_api.exe
-```
-
-## Versionamento no Git (LFS)
-
-Os arquivos `.exe`/`.dll` desta pasta são versionados via **Git LFS**
-(configurado em `.gitattributes` na raiz do `novaml_app`), para não inflar o
-histórico do repositório a cada novo build. Antes do primeiro commit destes
-binários em uma máquina nova:
-
-```cmd
-git lfs install
-git add .gitattributes release/
-git commit -m "release: atualiza executável"
-git push
-```
-
-Sem o `git lfs install`, o Git tentará versionar os binários normalmente —
-rode o comando acima uma vez por máquina/clone.
+cd novaml_ap
